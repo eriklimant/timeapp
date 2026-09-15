@@ -358,6 +358,14 @@
   body.glass .comp-tag.off{
     border-color:rgba(255,255,255,0.2);
   }
+  .comp-tag.limit{
+    background:transparent;
+    border:1px solid var(--border);
+    color:var(--text-dim);
+  }
+  body.glass .comp-tag.limit{
+    border-color:rgba(255,255,255,0.2);
+  }
   .comp-question{
     display:flex;
     align-items:center;
@@ -573,7 +581,7 @@
   }
 </style>
 </head>
-<body>
+<body class="glass">
 <div class="glass-bg"><span></span><span></span><span></span></div>
 <div class="wrap">
 
@@ -587,14 +595,6 @@
       <button type="button" data-lang="en">EN</button>
     </div>
   </header>
-
-  <div class="controls-row">
-    <span class="controls-label" id="themeLabel">Vzhľad</span>
-    <div class="segmented" id="themeSwitch">
-      <button type="button" data-theme="flat">Flat</button>
-      <button type="button" data-theme="glass">Glass</button>
-    </div>
-  </div>
 
   <!-- ============ TODAY VIEW ============ -->
   <div class="view active" id="viewToday">
@@ -638,6 +638,23 @@
         <div class="segmented" id="compSwitch">
           <button type="button" data-comp="no">Nie</button>
           <button type="button" data-comp="yes">Áno</button>
+        </div>
+      </div>
+      <div class="comp-question">
+        <span class="controls-label" id="customLimitLabel">Iný limit na tento deň?</span>
+        <div class="segmented" id="limitSwitch">
+          <button type="button" data-limit="no">Nie</button>
+          <button type="button" data-limit="yes">Áno</button>
+        </div>
+      </div>
+      <div class="form-row" id="customLimitRow" style="display:none;">
+        <div class="field">
+          <label for="limitHoursInput" id="customLimitInputLabel">Požadovaný čas pre tento deň</label>
+          <div class="time-split">
+            <input type="text" class="time-part" id="limitHoursInput" placeholder="8" inputmode="numeric" pattern="[0-9]*" maxlength="2">
+            <span class="time-sep">:</span>
+            <input type="text" class="time-part" id="limitMinutesInput" placeholder="20" inputmode="numeric" pattern="[0-9]*" maxlength="2">
+          </div>
         </div>
       </div>
       <button class="save" id="saveBtn" type="button">Uložiť deň</button>
@@ -705,7 +722,6 @@
   var COMP_SUBTRACT_MINUTES = 10; // what actually gets subtracted from the entered time
   var STORAGE_KEY = 'dochadzka_v1';
   var LANG_KEY = 'dochadzka_lang';
-  var THEME_KEY = 'dochadzka_theme';
 
   var I18N = {
     sk: {
@@ -713,9 +729,6 @@
       pageTitle: 'Dochádzka',
       appTitle: 'Dochádzka',
       dayLimitSuffix: '/ deň',
-      themeLabel: 'Vzhľad',
-      themeFlat: 'Flat',
-      themeGlass: 'Glass',
       tabToday: 'Dnes',
       tabWeeks: 'Týždne',
       heroLabel: 'Bilancia prescasov',
@@ -737,6 +750,11 @@
       compNo: 'Nie',
       compOnTitle: 'Od zadaného času sa odpočíta 10 min (čistý odpracovaný čas)',
       compOffTitle: 'Zadaný čas sa použije bez úpravy',
+      customLimitLabel: 'Iný limit na tento deň?',
+      customLimitInputLabel: 'Požadovaný čas pre tento deň',
+      alertBadLimit: 'Zadaj požadovaný čas pre tento deň vo formáte H:MM, napr. 4:15.',
+      limitTagPrefix: 'cieľ',
+      limitOnTitle: 'Pre tento deň platí vlastný požadovaný čas namiesto štandardných',
       historySectionLabel: 'História',
       historyEmpty: 'Zatiaľ nič nezapísané.',
       weekGroupLabel: function(fromStr, toStr, totalStr){
@@ -755,9 +773,6 @@
       pageTitle: 'Timesheet',
       appTitle: 'Timesheet',
       dayLimitSuffix: '/ day',
-      themeLabel: 'Appearance',
-      themeFlat: 'Flat',
-      themeGlass: 'Glass',
       tabToday: 'Today',
       tabWeeks: 'Weeks',
       heroLabel: 'Overtime balance',
@@ -779,6 +794,11 @@
       compNo: 'No',
       compOnTitle: '10 min is subtracted from the entered time (net worked time)',
       compOffTitle: 'The entered time is used without any adjustment',
+      customLimitLabel: 'Different target for this day?',
+      customLimitInputLabel: 'Required time for this day',
+      alertBadLimit: 'Enter the required time for this day in H:MM format, e.g. 4:15.',
+      limitTagPrefix: 'target',
+      limitOnTitle: 'This day uses a custom required time instead of the standard',
       historySectionLabel: 'History',
       historyEmpty: 'Nothing logged yet.',
       weekGroupLabel: function(fromStr, toStr, totalStr){
@@ -797,10 +817,6 @@
   var lang = localStorage.getItem(LANG_KEY) || 'sk';
   if(lang !== 'sk' && lang !== 'en') lang = 'sk';
 
-  var theme = localStorage.getItem(THEME_KEY) || 'flat';
-  if(theme === 'calc') theme = 'flat'; // migrate away from the removed calculator theme
-  if(theme !== 'flat' && theme !== 'glass') theme = 'flat';
-
   var activeTab = 'today';
   var weekOffset = 0; // 0 = current week, -1 = previous week, ...
 
@@ -816,10 +832,13 @@
   var cancelEdit = document.getElementById('cancelEdit');
   var compSwitch = document.getElementById('compSwitch');
   var compState = false;
+  var limitSwitch = document.getElementById('limitSwitch');
+  var customLimitRow = document.getElementById('customLimitRow');
+  var limitHoursInput = document.getElementById('limitHoursInput');
+  var limitMinutesInput = document.getElementById('limitMinutesInput');
+  var limitState = false;
   var dayLimitLabel = document.getElementById('dayLimitLabel');
   var langSwitch = document.getElementById('langSwitch');
-  var themeSwitch = document.getElementById('themeSwitch');
-  var themeLabelEl = document.getElementById('themeLabel');
 
   var tabToday = document.getElementById('tabToday');
   var tabWeeks = document.getElementById('tabWeeks');
@@ -838,13 +857,6 @@
 
   function t(){ return I18N[lang]; }
 
-  function applyTheme(){
-    document.body.classList.toggle('glass', theme === 'glass');
-    themeSwitch.querySelectorAll('button').forEach(function(btn){
-      btn.classList.toggle('active', btn.dataset.theme === theme);
-    });
-  }
-
   function setCompState(val){
     compState = val;
     compSwitch.querySelectorAll('button').forEach(function(btn){
@@ -854,6 +866,23 @@
   compSwitch.querySelectorAll('button').forEach(function(btn){
     btn.addEventListener('click', function(){
       setCompState(btn.dataset.comp === 'yes');
+    });
+  });
+
+  function setLimitState(val){
+    limitState = val;
+    limitSwitch.querySelectorAll('button').forEach(function(btn){
+      btn.classList.toggle('active', (btn.dataset.limit === 'yes') === limitState);
+    });
+    customLimitRow.style.display = limitState ? 'flex' : 'none';
+    if(limitState && limitHoursInput.value === '' && limitMinutesInput.value === ''){
+      limitHoursInput.value = String(Math.floor(DAILY_LIMIT_MIN / 60));
+      limitMinutesInput.value = String(DAILY_LIMIT_MIN % 60).padStart(2,'0');
+    }
+  }
+  limitSwitch.querySelectorAll('button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      setLimitState(btn.dataset.limit === 'yes');
     });
   });
 
@@ -869,6 +898,20 @@
     if(e.key === 'Backspace' && minutesInput.value === ''){
       hoursInput.focus();
       hoursInput.select();
+    }
+  });
+
+  limitHoursInput.addEventListener('input', function(){
+    limitHoursInput.value = digitsOnly(limitHoursInput.value).slice(0,2);
+    if(limitHoursInput.value.length === 2){ limitMinutesInput.focus(); limitMinutesInput.select(); }
+  });
+  limitMinutesInput.addEventListener('input', function(){
+    limitMinutesInput.value = digitsOnly(limitMinutesInput.value).slice(0,2);
+  });
+  limitMinutesInput.addEventListener('keydown', function(e){
+    if(e.key === 'Backspace' && limitMinutesInput.value === ''){
+      limitHoursInput.focus();
+      limitHoursInput.select();
     }
   });
 
@@ -889,7 +932,6 @@
     document.title = s.pageTitle;
     document.getElementById('appTitle').textContent = s.appTitle;
     dayLimitLabel.textContent = formatMinutes(DAILY_LIMIT_MIN) + ' ' + s.dayLimitSuffix;
-    themeLabelEl.textContent = s.themeLabel;
     document.querySelectorAll('.js-balance-label').forEach(function(el){ el.textContent = s.heroLabel; });
     document.getElementById('weekSectionLabel').textContent = s.weekSectionLabel;
     document.getElementById('formSectionLabel').textContent = s.formSectionLabel;
@@ -907,9 +949,10 @@
     document.getElementById('compQuestionLabel').textContent = s.compQuestionLabel;
     compSwitch.querySelector('[data-comp="no"]').textContent = s.compNo;
     compSwitch.querySelector('[data-comp="yes"]').textContent = s.compYes;
-
-    themeSwitch.querySelector('[data-theme="flat"]').textContent = s.themeFlat;
-    themeSwitch.querySelector('[data-theme="glass"]').textContent = s.themeGlass;
+    document.getElementById('customLimitLabel').textContent = s.customLimitLabel;
+    document.getElementById('customLimitInputLabel').textContent = s.customLimitInputLabel;
+    limitSwitch.querySelector('[data-limit="no"]').textContent = s.compNo;
+    limitSwitch.querySelector('[data-limit="yes"]').textContent = s.compYes;
 
     langSwitch.querySelectorAll('button').forEach(function(btn){
       btn.classList.toggle('active', btn.dataset.lang === lang);
@@ -922,14 +965,6 @@
       localStorage.setItem(LANG_KEY, lang);
       applyStaticText();
       render();
-    });
-  });
-
-  themeSwitch.querySelectorAll('button').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      theme = btn.dataset.theme;
-      localStorage.setItem(THEME_KEY, theme);
-      applyTheme();
     });
   });
 
@@ -963,6 +998,16 @@
   function readTimeInputs(){
     var hStr = hoursInput.value.trim();
     var mStr = minutesInput.value.trim();
+    if(hStr === '' && mStr === '') return null;
+    var h = hStr === '' ? 0 : parseInt(hStr, 10);
+    var m = mStr === '' ? 0 : parseInt(mStr, 10);
+    if(isNaN(h) || isNaN(m) || h < 0 || m < 0 || m > 59) return null;
+    return h * 60 + m;
+  }
+
+  function readLimitInputs(){
+    var hStr = limitHoursInput.value.trim();
+    var mStr = limitMinutesInput.value.trim();
     if(hStr === '' && mStr === '') return null;
     var h = hStr === '' ? 0 : parseInt(hStr, 10);
     var m = mStr === '' ? 0 : parseInt(mStr, 10);
@@ -1013,11 +1058,16 @@
   // needs to be backed out here to get the real net worked time used for
   // all calculations. If unchecked, the entered time is used as-is.
   function normalizeEntry(raw){
-    if(raw && typeof raw === 'object'){ return { m: raw.m || 0, c: !!raw.c }; }
-    return { m: raw || 0, c: false };
+    if(raw && typeof raw === 'object'){
+      return { m: raw.m || 0, c: !!raw.c, limit: (typeof raw.limit === 'number' ? raw.limit : null) };
+    }
+    return { m: raw || 0, c: false, limit: null };
   }
   function effectiveMinutes(entry){
     return entry.c ? (entry.m - COMP_SUBTRACT_MINUTES) : entry.m;
+  }
+  function dayLimitFor(entry){
+    return (entry.limit != null) ? entry.limit : DAILY_LIMIT_MIN;
   }
 
   function renderBalance(){
@@ -1027,8 +1077,9 @@
     var total = 0;
     var totalWorked = 0;
     dates.forEach(function(d){
-      var eff = effectiveMinutes(normalizeEntry(entries[d]));
-      total += (eff - DAILY_LIMIT_MIN);
+      var entry = normalizeEntry(entries[d]);
+      var eff = effectiveMinutes(entry);
+      total += (eff - dayLimitFor(entry));
       totalWorked += eff;
     });
     document.querySelectorAll('.js-balance').forEach(function(el){
@@ -1085,13 +1136,15 @@
         g.days.forEach(function(d){
           var entry = normalizeEntry(entries[d]);
           var mins = effectiveMinutes(entry);
-          var diff = mins - DAILY_LIMIT_MIN;
+          var dayLimit = dayLimitFor(entry);
+          var diff = mins - dayLimit;
           var dObj = parseDate(d);
           var label = s.dayNames[dObj.getDay()] + ' ' + fmtShort(dObj);
           var compTag = '<span class="comp-tag ' + (entry.c ? 'on' : 'off') + '" title="' + (entry.c ? s.compOnTitle : s.compOffTitle) + '">' + (entry.c ? ('−' + COMP_SUBTRACT_MINUTES) : '±0') + '</span>';
+          var limitTag = entry.limit != null ? ('<span class="comp-tag limit" title="' + s.limitOnTitle + ' ' + formatMinutes(DAILY_LIMIT_MIN) + '">' + s.limitTagPrefix + ' ' + formatMinutes(dayLimit) + '</span>') : '';
           html += '<div class="day-row" data-date="'+d+'">' +
                     '<div class="date">'+label+'</div>' +
-                    '<div class="worked">'+formatMinutes(mins)+compTag+'</div>' +
+                    '<div class="worked">'+formatMinutes(mins)+compTag+limitTag+'</div>' +
                     '<div class="diff '+signClass(diff)+'">'+(diff>0?'+':'')+formatMinutes(diff)+'</div>' +
                     '<div class="del" data-del="'+d+'">&times;</div>' +
                   '</div>';
@@ -1160,13 +1213,15 @@
       weekDates.forEach(function(d){
         var entry = normalizeEntry(entries[d]);
         var mins = effectiveMinutes(entry);
-        var dDiff = mins - DAILY_LIMIT_MIN;
+        var dayLimit = dayLimitFor(entry);
+        var dDiff = mins - dayLimit;
         var dObj = parseDate(d);
         var label = s.dayNames[dObj.getDay()] + ' ' + fmtShort(dObj);
         var compTag = '<span class="comp-tag ' + (entry.c ? 'on' : 'off') + '" title="' + (entry.c ? s.compOnTitle : s.compOffTitle) + '">' + (entry.c ? ('−' + COMP_SUBTRACT_MINUTES) : '±0') + '</span>';
+        var limitTag = entry.limit != null ? ('<span class="comp-tag limit" title="' + s.limitOnTitle + ' ' + formatMinutes(DAILY_LIMIT_MIN) + '">' + s.limitTagPrefix + ' ' + formatMinutes(dayLimit) + '</span>') : '';
         html += '<div class="day-row static">' +
                   '<div class="date">'+label+'</div>' +
-                  '<div class="worked">'+formatMinutes(mins)+compTag+'</div>' +
+                  '<div class="worked">'+formatMinutes(mins)+compTag+limitTag+'</div>' +
                   '<div class="diff '+signClass(dDiff)+'">'+(dDiff>0?'+':'')+formatMinutes(dDiff)+'</div>' +
                 '</div>';
       });
@@ -1180,6 +1235,15 @@
     hoursInput.value = String(Math.floor(entry.m / 60));
     minutesInput.value = String(entry.m % 60).padStart(2,'0');
     setCompState(!!entry.c);
+    if(entry.limit != null){
+      limitHoursInput.value = String(Math.floor(entry.limit / 60));
+      limitMinutesInput.value = String(entry.limit % 60).padStart(2,'0');
+      setLimitState(true);
+    } else {
+      limitHoursInput.value = '';
+      limitMinutesInput.value = '';
+      setLimitState(false);
+    }
     editBanner.classList.add('show');
     setActiveTab('today');
     window.scrollTo({top:0, behavior:'smooth'});
@@ -1192,6 +1256,9 @@
     hoursInput.value = '';
     minutesInput.value = '';
     setCompState(false);
+    limitHoursInput.value = '';
+    limitMinutesInput.value = '';
+    setLimitState(false);
     editBanner.classList.remove('show');
   }
 
@@ -1203,16 +1270,21 @@
     if(!d){ alert(s.alertPickDate); return; }
     var mins = readTimeInputs();
     if(mins === null){ alert(s.alertBadTime); return; }
+    var customLimit = null;
+    if(limitState){
+      customLimit = readLimitInputs();
+      if(customLimit === null){ alert(s.alertBadLimit); return; }
+    }
     var entries = loadEntries();
-    entries[d] = { m: mins, c: compState };
+    entries[d] = { m: mins, c: compState, limit: customLimit };
     saveEntries(entries);
     resetForm();
     render();
   });
 
   dateInput.value = todayStr();
-  applyTheme();
   setCompState(false);
+  setLimitState(false);
   applyStaticText();
   render();
 
